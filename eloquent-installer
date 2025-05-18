@@ -1,0 +1,70 @@
+// eloquent-adapter-installer.php - Установщик Eloquent для Meract
+
+use Meract\Core\SDR;
+use Symfony\Component\Process\Process;
+
+// Проверка контекста Meract
+if (!class_exists(SDR::class)) {
+    die("Error: Run this only via 'php mrst provide'\n");
+}
+
+// Установка пакетов
+echo "Installing Eloquent ORM...\n";
+(new Process(['composer', 'require', 'illuminate/database']))->mustRun();
+
+// Создание интегрирующего скрипта
+file_put_contents(__DIR__.'/../../app/core/eloquent.php', <<<'PHP'
+<?php
+// app/core/eloquent.php - Автоматическая интеграция Eloquent
+use Illuminate\Database\Capsule\Manager as Capsule;
+use Meract\Core\SDR;
+
+$config = SDR::make('config')['database'] ?? [];
+if (empty($config)) {
+    throw new RuntimeException('Database config not found in config.php');
+}
+
+$connection = match($config['driver']) {
+    'sqlite' => [
+        'driver' => 'sqlite',
+        'database' => $config['sqlite_path'],
+        'prefix' => $config['prefix'] ?? '',
+        'foreign_key_constraints' => $config['foreign_key_constraints'] ?? false,
+    ],
+    'pgsql' => [
+        'driver' => 'pgsql',
+        'host' => $config['host'],
+        'port' => $config['port'],
+        'database' => $config['dbname'],
+        'username' => $config['username'],
+        'password' => $config['password'],
+        'charset' => $config['charset'] ?? 'utf8',
+        'schema' => $config['schema'] ?? 'public',
+    ],
+    default => [ // mysql и другие
+        'driver' => $config['driver'],
+        'host' => $config['host'],
+        'port' => $config['port'] ?? 3306,
+        'database' => $config['dbname'],
+        'username' => $config['username'],
+        'password' => $config['password'],
+        'charset' => $config['charset'] ?? 'utf8mb4',
+        'collation' => $config['collation'] ?? 'utf8mb4_unicode_ci',
+    ]
+};
+
+$capsule = new Capsule;
+$capsule->addConnection($connection);
+$capsule->setAsGlobal();
+$capsule->bootEloquent();
+
+// Проверка подключения
+try {
+    $capsule->getConnection()->getPdo();
+} catch (Exception $e) {
+    throw new RuntimeException("DB connection failed: " . $e->getMessage());
+}
+PHP
+);
+
+echo "Success! Eloquent integrated via app/core/eloquent.php\n";
